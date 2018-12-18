@@ -30,6 +30,7 @@ import (
 	persistencefactory "github.com/uber/cadence/common/persistence/persistence-factory"
 	"github.com/uber/cadence/common/service"
 	"github.com/uber/cadence/common/service/dynamicconfig"
+	"github.com/uber/cadence/service/worker/indexer"
 	"github.com/uber/cadence/service/worker/replicator"
 	"github.com/uber/cadence/service/worker/sysworkflow"
 	"go.uber.org/cadence/.gen/go/shared"
@@ -59,6 +60,7 @@ type (
 	Config struct {
 		ReplicationCfg *replicator.Config
 		SysWorkflowCfg *sysworkflow.Config
+		IndexerCfg     *indexer.Config
 	}
 )
 
@@ -82,6 +84,15 @@ func NewConfig(dc *dynamicconfig.Collection) *Config {
 			ReplicationTaskMaxRetry:    dc.GetIntProperty(dynamicconfig.WorkerReplicationTaskMaxRetry, 50),
 		},
 		SysWorkflowCfg: &sysworkflow.Config{},
+		IndexerCfg: &indexer.Config{
+			EnableIndexer:            dc.GetBoolProperty(dynamicconfig.EnableVisibilityToKafka, dynamicconfig.DefaultEnableVisibilityToKafka),
+			IndexerConcurrency:       dc.GetIntProperty(dynamicconfig.WorkerIndexerConcurrency, 1000),
+			ESProcessorNumOfWorkers:  dc.GetIntProperty(dynamicconfig.WorkerESProcessorNumOfWorkers, 1),
+			ESProcessorBulkActions:   dc.GetIntProperty(dynamicconfig.WorkerESProcessorBulkActions, 1000),
+			ESProcessorBulkSize:      dc.GetIntProperty(dynamicconfig.WorkerESProcessorBulkSize, 2<<24), // 16MB
+			ESProcessorFlushInterval: dc.GetDurationProperty(dynamicconfig.WorkerESProcessorFlushInterval, 10*time.Second),
+			ESProcessorRetryInterval: dc.GetDurationProperty(dynamicconfig.WorkerESProcessorRetryInterval, 5*time.Minute),
+		},
 	}
 }
 
@@ -98,6 +109,10 @@ func (s *Service) Start() {
 
 	if s.params.ClusterMetadata.IsGlobalDomainEnabled() {
 		s.startReplicator(params, base, log)
+	}
+
+	if s.config.IndexerCfg.EnableIndexer() {
+		s.startIndexer(params, base, log)
 	}
 
 	log.Infof("%v started", common.WorkerServiceName)
@@ -133,7 +148,15 @@ func (s *Service) startReplicator(params *service.BootstrapParams, base service.
 		s.metricsClient)
 	if err := replicator.Start(); err != nil {
 		replicator.Stop()
-		log.Fatalf("Fail to start replicator: %v", err)
+		log.Fatalf("fail to start replicator: %v", err)
+	}
+}
+
+func (s *Service) startIndexer(params *service.BootstrapParams, base service.Service, log bark.Logger) {
+	indexer := indexer.NewIndexer(s.config.IndexerCfg, params.MessagingClient, params.ESClient, log, s.metricsClient)
+	if err := indexer.Start(); err != nil {
+		indexer.Stop()
+		log.Fatalf("fail to start indexer: %v", err)
 	}
 }
 
