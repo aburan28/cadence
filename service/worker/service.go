@@ -85,7 +85,6 @@ func NewConfig(dc *dynamicconfig.Collection) *Config {
 		},
 		SysWorkflowCfg: &sysworkflow.Config{},
 		IndexerCfg: &indexer.Config{
-			EnableIndexer:            dc.GetBoolProperty(dynamicconfig.EnableVisibilityToKafka, dynamicconfig.DefaultEnableVisibilityToKafka),
 			IndexerConcurrency:       dc.GetIntProperty(dynamicconfig.WorkerIndexerConcurrency, 1000),
 			ESProcessorNumOfWorkers:  dc.GetIntProperty(dynamicconfig.WorkerESProcessorNumOfWorkers, 1),
 			ESProcessorBulkActions:   dc.GetIntProperty(dynamicconfig.WorkerESProcessorBulkActions, 1000),
@@ -110,7 +109,7 @@ func (s *Service) Start() {
 		s.startReplicator(params, base, log)
 	}
 
-	if s.config.IndexerCfg.EnableIndexer() {
+	if s.params.ESConfig.Enable {
 		s.startIndexer(params, base, log)
 	}
 
